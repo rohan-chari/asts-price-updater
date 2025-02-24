@@ -63,7 +63,7 @@ function connectWebSocket() {
 
     socket.addEventListener('open', () => {
         console.log("✅ WebSocket Connected");
-        sendMessage({ 'type': 'subscribe', 'symbol': 'BINANCE:BTCUSDT' });
+        sendMessage({ 'type': 'subscribe', 'symbol': 'ASTS' });
     });
 
     socket.addEventListener('message', async (event) => {
