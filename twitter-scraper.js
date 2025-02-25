@@ -1,66 +1,53 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 require('dotenv').config();
+
+// Import helper functions
+const { randomDelay, clickRepliesButtonWithMouse } = require('./helper-functions');
+
 puppeteer.use(StealthPlugin());
 
 const TWITTER_USERNAME = process.env.TWITTER_USERNAME;  
-const TWITTER_PASSWORD = process.env.TWITTER_PASSWORD;  
+const TWITTER_PASSWORD = process.env.TWITTER_PASSWORD;
+const TARGET_USERS = process.env.TWITTER_TARGETS ? process.env.TWITTER_TARGETS.split(',') : [];
 
 async function loginTwitter(page) {
-    await page.goto('https://twitter.com/login', { waitUntil: 'networkidle2' });
+    await page.goto('https://x.com/login', { waitUntil: 'networkidle2' });
 
-    // Enter username
     await page.waitForSelector('input[name="text"]');
     await page.type('input[name="text"]', TWITTER_USERNAME);
     await page.keyboard.press('Enter');
     await new Promise(resolve => setTimeout(resolve, 3000)); 
 
-    // Enter password
     await page.waitForSelector('input[name="password"]', { visible: true });
     await page.type('input[name="password"]', TWITTER_PASSWORD, { delay: 100 }); 
     await page.keyboard.press('Enter');
-    
 
-    // Wait for navigation after login
     await page.waitForNavigation();
     console.log('Logged into Twitter successfully.');
 }
 
-async function scrapeTwitter() {
-    const browser = await puppeteer.launch({ headless: false, slowMo: 100 });
-    const page = await browser.newPage();
+async function navigateToProfile(page) {
+    for (const user of TARGET_USERS) {      
+        await page.goto(`https://x.com/${user}`, { waitUntil: 'domcontentloaded' });
 
-    // Login to Twitter
-    await loginTwitter(page);
+        await randomDelay();
+        
+        await clickRepliesButtonWithMouse(page);
 
-    // Navigate to the search page
-    await page.goto(`https://x.com/thekookreport`, {
-        waitUntil: 'domcontentloaded'
-    });
-
-    // Scroll down to load more tweets
-    for (let i = 0; i < 5; i++) {
-        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await new Promise(resolve => setTimeout(resolve, 4000)); // Wait for 4 seconds
+        await randomDelay();
     }
-
-    // Wait for tweets to load
-    await page.waitForSelector('article', { timeout: 60000 });
-
-    // Extract tweets
-    const tweets = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('article')).slice(0, 10).map(tweet => {
-            const content = tweet.querySelector('div[lang]')?.innerText || 'No text';
-            const username = tweet.querySelector('a[href*="/status/"]')?.href.split('/')[3] || 'Unknown';
-            const tweetUrl = tweet.querySelector('a[href*="/status/"]')?.href || 'No URL';
-            return { username, content, tweetUrl };
-        });
-    });
-
-    console.log(tweets);
-    await browser.close();
-    return tweets;
 }
 
-// Run the scraper
-scrapeTwitter().then(console.log).catch(console.error);
+
+async function scrapeTwitterProfile() {
+    const browser = await puppeteer.launch({ headless: false, slowMo: 50 });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+
+    await loginTwitter(page);
+    await randomDelay();
+    await navigateToProfile(page);
+}
+
+scrapeTwitterProfile();
