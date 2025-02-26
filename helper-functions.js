@@ -107,6 +107,10 @@ async function clickRepliesButtonWithMouse(page) {
     }
 }
 
+async function scrollDown(page) {
+    await page.mouse.wheel({deltaY:400});
+}
+
 
 // Export functions for use in main script
 module.exports = {
@@ -115,5 +119,6 @@ module.exports = {
     moveMouseSmoothly,
     humanScroll,
     installMouseHelper,
-    clickRepliesButtonWithMouse
+    clickRepliesButtonWithMouse,
+    scrollDown
 };
