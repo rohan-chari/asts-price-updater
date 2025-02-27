@@ -1,6 +1,6 @@
 // Random delay function
 async function randomDelay() {
-    const delayTime = Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000;
+    const delayTime = Math.floor(Math.random() * (10000 - 5000 + 1)) + 2000;
     return new Promise(resolve => setTimeout(resolve, delayTime));
 }
 
@@ -26,26 +26,6 @@ async function moveMouseSmoothly(page, x, y) {
     console.log('✅ Mouse movement completed.');
 }
 
-// Scroll function that mimics human scrolling
-async function humanScroll(page, targetSelector = null, scrollAmount = 500, steps = 20) {
-    console.log(`🔽 Scrolling ${scrollAmount}px in ${steps} smooth steps...`);
-
-    if (targetSelector) {
-        const element = await page.$(targetSelector);
-        if (element) {
-            console.log(`🎯 Scrolling to element: ${targetSelector}`);
-            await element.scrollIntoView({ behavior: "smooth", block: "center" });
-            return;
-        }
-    }
-
-    for (let i = 0; i < steps; i++) {
-        await page.evaluate(y => window.scrollBy(0, y), scrollAmount / steps);
-        await delay(50 + Math.random() * 150);
-    }
-
-    console.log("✅ Finished smooth scrolling.");
-}
 
 // Installs a mouse tracker in the browser for debugging
 async function installMouseHelper(page) {
@@ -107,9 +87,84 @@ async function clickRepliesButtonWithMouse(page) {
     }
 }
 
-async function scrollDown(page) {
-    await page.mouse.wheel({deltaY:400});
+async function clickFirstNonPinnedTweet(page) {
+    let maxAttempts = 5 
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        // Get all tweets currently loaded
+        console.log('attempt #: ' + attempts)
+        const tweets = await page.$$('article');
+        
+        if (tweets.length > 0) {
+            for (const tweet of tweets) {
+                // Check if this tweet contains a div with "Pinned"
+                const isPinned = await page.evaluate(el => {
+                    return Array.from(el.querySelectorAll('div'))
+                        .some(div => div.innerText.trim() === "Pinned");
+                }, tweet);
+
+                if (!isPinned) {
+                    await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), tweet);
+                    console.log("Found non-pinned tweet and centered it.");
+                
+                    const timestamp = await tweet.$('time');
+                    if (timestamp) {
+                        await page.evaluate(el => el.click(), timestamp);
+                    } else {
+                        // Fallback: click the tweet body or entire tweet
+                        const tweetBody = await tweet.$('[data-testid="tweet"]');
+                        if (tweetBody) {
+                            await page.evaluate(el => el.click(), tweetBody);
+                        } else {
+                            await page.evaluate(el => el.click(), tweet);
+                        }
+                    }
+                
+                    
+                    // **Wait for thread to fully load before interacting again**
+                    await page.waitForSelector('[data-testid="tweetText"]', { visible: true });
+                
+                
+                    // **Wait some time before scrolling up to avoid UI disruptions**
+                    await randomDelay();
+                
+                    // **Now scroll to top safely**
+                    await scrollToTop(page);
+                
+                    return; // Ensure it only processes one tweet
+                }
+
+                console.log("Skipping pinned tweet...");
+            }
+        }
+
+
+        await humanLikeScroll(page);
+
+        attempts++;
+    }
+    return null;
 }
+
+// Human-like scrolling with random delays
+async function humanLikeScroll(page) {
+    const scrollAmount = Math.floor(Math.random() * 300) + 100; // Between 100-300px
+    await page.mouse.wheel({ deltaY: scrollAmount });
+
+    console.log(`Scrolled down by ${scrollAmount}px`);
+
+    // Wait a random time to mimic human behavior
+    await randomDelay(); // 300-800ms
+}
+
+async function scrollToTop(page) {
+    await page.evaluate(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    console.log("Scrolled to top.");
+}
+
 
 
 // Export functions for use in main script
@@ -117,8 +172,8 @@ module.exports = {
     randomDelay,
     delay,
     moveMouseSmoothly,
-    humanScroll,
     installMouseHelper,
     clickRepliesButtonWithMouse,
-    scrollDown
+    clickFirstNonPinnedTweet,
+    humanLikeScroll
 };

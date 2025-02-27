@@ -3,7 +3,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 require('dotenv').config();
 
 // Import helper functions
-const { randomDelay, clickRepliesButtonWithMouse,scrollDown } = require('./helper-functions');
+const { randomDelay, clickRepliesButtonWithMouse,clickFirstNonPinnedTweet } = require('./helper-functions');
 
 puppeteer.use(StealthPlugin());
 
@@ -34,7 +34,8 @@ async function navigateToProfile(page) {
         await randomDelay();
         
         await clickRepliesButtonWithMouse(page);
-        await scrollDown(page);
+        await clickFirstNonPinnedTweet(page)
+
         //remove this
         break;
     }
