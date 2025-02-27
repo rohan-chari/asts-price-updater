@@ -152,82 +152,99 @@ async function clickFirstNonPinnedTweet(page) {
 }
 
 async function getTweetsOnPage(page) {
-    return await page.evaluate(() => {
-        const getText = (el) => (el ? el.innerText.trim() : null);
-        const getImages = (el) => el ? Array.from(el.querySelectorAll('img')).map(img => img.src) : [];
-
-        return Array.from(document.querySelectorAll('article')).map(tweet => {
-        // Outer text
-        const contentEl = tweet.querySelector('div[data-testid="tweetText"]');
-        const content = getText(contentEl) || 'No text';
-
-        // Gather all status anchors but exclude any /photo/
-        let anchors = Array
-            .from(tweet.querySelectorAll('a[href*="/status/"]'))
-            .filter(a => !a.href.includes('/photo/'));
-
-        // Remove duplicates by href
-        // (Converts to a Set of unique href strings, then back to DOM anchors)
-        const uniqueHrefs = [...new Set(anchors.map(a => a.href))];
-        anchors = uniqueHrefs.map(href => anchors.find(a => a.href === href));
-
-        // Decide outer vs quoted
-        let outerAnchor = null;
-        let quoteAnchor = null;
-        if (anchors.length === 1) {
-            // Only 1 anchor -> no quote tweet
-            outerAnchor = anchors[0];
-        } else if (anchors.length > 1) {
-            // Assume last anchor is the outer tweet, first anchor is quoted
-            quoteAnchor = anchors[0];
-            outerAnchor = anchors[anchors.length - 1];
-        }
-
-        // Outer tweet info
-        const tweetUrl = outerAnchor 
-            ? `https://x.com${outerAnchor.getAttribute('href').split('?')[0].split('/analytics')[0]}` 
-            : 'No URL';
-
-        const tweetIdPart = outerAnchor 
-            ? outerAnchor.href.split("/status/")[1] 
-            : null;
-        const tweetId = tweetIdPart
-            ? tweetIdPart.split("?")[0].split("/")[0]
-            : null;
-
-        const username = outerAnchor
-            ? outerAnchor.href.split('/')[3]
-            : 'Unknown';
-
-        // Quoted tweet URL
-        const possibleQuoteUrl = quoteAnchor 
-        ? `https://x.com${quoteAnchor.getAttribute('href')
-            .split('?')[0]
-            .split('/analytics')[0]}` 
-        : null;
-
-        // Compare against outer tweetUrl, then finalize
-        const quote_tweet = possibleQuoteUrl === tweetUrl 
-        ? null 
-        : possibleQuoteUrl;
-
-
-        // Images
-        const imageContainer = tweet.querySelector('div[data-testid="tweetPhoto"]');
-        const images = getImages(imageContainer);
-        const finalImages = images.length ? images : null;
-
-        return {
-            username: username,
-            tweet: content,
-            quote_tweet: quote_tweet,
-            images: finalImages,
-            tweetUrl: tweetUrl,
-            tweetId: tweetId
-        };
-        });
+    page.on('console', (msg) => {
+      console.log(msg.text());
     });
-}
+  
+    return await page.evaluate(() => {
+      const getText = (el) => (el ? el.innerText.trim() : null);
+  
+      const results = [];
+      const articles = Array.from(document.querySelectorAll('article'));
+      
+      articles.forEach((tweet, index) => {
+        const contentEls = tweet.querySelectorAll('div[data-testid="tweetText"]');
+        const contentArray = Array.from(contentEls).map((el) => getText(el));
+  
+        const authorEls = tweet.querySelectorAll('div[data-testid="User-Name"]');
+        const authorArray = Array.from(authorEls)
+            .map(el => getText(el)) // Extracts full author text
+            .map(text => {
+                const match = text.match(/@\w+/); // Extract @username
+                return match ? match[0].replace('@', '') : null; // Remove '@' for direct comparison
+            })
+            .filter(Boolean); // Remove null values
+            
+        const imageEls = tweet.querySelectorAll('a[href*="/photo/"]');
+        const imageArray = Array.from(imageEls)
+            .map(el => el.getAttribute('href'))
+            .filter(href => authorArray.some(author => href.includes(`/${author}/`))); // Ignore @ and check match
+        
+        const imagesByAuthor = {};
+        imageArray.forEach(href => {
+            let imageAuthorIndex = authorArray.findIndex(author => href.includes(`/${author}/`));
+            
+            if (imageAuthorIndex !== -1) {
+                let imageAuthor = authorArray[imageAuthorIndex];
+                let imageAnchor = tweet.querySelector(`a[href="${href}"]`); // Find <a> tag
+                
+                if (imageAnchor) {
+                    let imageTag = imageAnchor.querySelector('img'); // Find <img> inside <a>
+                    
+                    if (imageTag) {
+                        let imgUrl = imageTag.src; // Extract image URL
+                        
+                        if (!imagesByAuthor[imageAuthor]) {
+                            imagesByAuthor[imageAuthor] = []; // Initialize array if not exists
+                        }
+                        imagesByAuthor[imageAuthor].push(imgUrl);
+                    }
+                }
+            }
+        });
+
+            
+    
+            
+
+        const idEls = tweet.querySelectorAll('a[href*="/status/"]');
+        const idArray = Array.from(idEls)
+            .map(el => el.getAttribute('href'))
+            .filter(href => !href.includes('/photo/') && !href.includes('/analytics'))
+            .map(href => href.split('/status/')[1]?.split('/')[0]);
+
+
+        
+
+        let result = {
+          tweet_id: idArray[0],
+          tweet_text: contentArray[0] || null,
+          tweet_author: authorArray[0] || null,
+          tweet_images: imagesByAuthor[authorArray[0]] || null,
+          quote_text: null,
+          quote_author: null,
+          quote_images: imagesByAuthor[authorArray[1]] || null
+        };
+  
+        if (contentArray.length > 1) {
+          result.quote_text = contentArray[1];
+          result.quote_author = authorArray[1] || null;
+        }
+  
+        // Check for ASTS
+        if (
+          (result.tweet_text && result.tweet_text.includes("ASTS")) ||
+          (result.quote_text && result.quote_text.includes("ASTS"))
+        ) {
+          results.push(result);
+        }
+      });
+  
+      return results;
+    });
+  }
+  
+  
   
   
 async function humanLikeScroll(page) {
