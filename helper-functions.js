@@ -131,7 +131,47 @@ async function clickFirstNonPinnedTweet(page) {
                 
                     // **Now scroll to top safely**
                     await scrollToTop(page);
+                    await randomDelay();
+                    //put this into new function - pass in page. Add delay too
+                    const tweets = await page.evaluate(() => {
+                        return Array.from(document.querySelectorAll('article')).map(tweet => {
+                            const getText = (el) => (el ? el.innerText.trim() : null);
+                            const getImages = (el) => el ? Array.from(el.querySelectorAll('img')).map(img => img.src) : [];
                 
+                            // Main tweet text
+                            const contentEl = tweet.querySelector('div[data-testid="tweetText"]');
+                            const content = getText(contentEl);
+                
+                            // Quoted tweet (if present)
+                            const quoteTweetEl = tweet.querySelector('div[data-testid="tweet"]');
+                            const quoteTextEl = quoteTweetEl ? quoteTweetEl.querySelector('div[data-testid="tweetText"]') : null;
+                            const quoteText = getText(quoteTextEl);
+                
+                            // Image URLs
+                            const imageContainer = tweet.querySelector('div[data-testid="tweetPhoto"]');
+                            const images = getImages(imageContainer);
+                
+                            // Tweet URL
+                            const tweetUrlEl = tweet.querySelector('a[href*="/status/"]');
+                            const tweetUrl = tweetUrlEl ? `https://x.com${tweetUrlEl.getAttribute('href')}` : null;
+
+                            //Tweet ID
+                            const tweetIdEl = tweet.querySelector('a[href*="/status/"]');
+                            const tweetId = tweetIdEl ? tweetIdEl.href.split("/status/")[1].split("?")[0] : null;
+                
+                            return {
+                                username: tweetUrl ? tweetUrl.split('/')[3] : 'Unknown',
+                                tweet: content || 'No text',
+                                quote_tweet: quoteText || null,
+                                images: images.length ? images : null,
+                                tweetUrl: tweetUrl || 'No URL',
+                                tweetId: tweetId || null
+                            };
+                        });
+                    });
+                
+                    console.log(tweets);
+                    
                     return; // Ensure it only processes one tweet
                 }
 
@@ -144,10 +184,8 @@ async function clickFirstNonPinnedTweet(page) {
 
         attempts++;
     }
-    return null;
 }
 
-// Human-like scrolling with random delays
 async function humanLikeScroll(page) {
     const scrollAmount = Math.floor(Math.random() * 300) + 100; // Between 100-300px
     await page.mouse.wheel({ deltaY: scrollAmount });
