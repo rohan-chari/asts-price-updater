@@ -133,42 +133,7 @@ async function clickFirstNonPinnedTweet(page) {
                     await scrollToTop(page);
                     await randomDelay();
                     //put this into new function - pass in page. Add delay too
-                    const tweets = await page.evaluate(() => {
-                        return Array.from(document.querySelectorAll('article')).map(tweet => {
-                            const getText = (el) => (el ? el.innerText.trim() : null);
-                            const getImages = (el) => el ? Array.from(el.querySelectorAll('img')).map(img => img.src) : [];
-                
-                            // Main tweet text
-                            const contentEl = tweet.querySelector('div[data-testid="tweetText"]');
-                            const content = getText(contentEl);
-                
-                            // Quoted tweet (if present)
-                            const quoteTweetEl = tweet.querySelector('div[data-testid="tweet"]');
-                            const quoteTextEl = quoteTweetEl ? quoteTweetEl.querySelector('div[data-testid="tweetText"]') : null;
-                            const quoteText = getText(quoteTextEl);
-                
-                            // Image URLs
-                            const imageContainer = tweet.querySelector('div[data-testid="tweetPhoto"]');
-                            const images = getImages(imageContainer);
-                
-                            // Tweet URL
-                            const tweetUrlEl = tweet.querySelector('a[href*="/status/"]');
-                            const tweetUrl = tweetUrlEl ? `https://x.com${tweetUrlEl.getAttribute('href')}` : null;
-
-                            //Tweet ID
-                            const tweetIdEl = tweet.querySelector('a[href*="/status/"]');
-                            const tweetId = tweetIdEl ? tweetIdEl.href.split("/status/")[1].split("?")[0] : null;
-                
-                            return {
-                                username: tweetUrl ? tweetUrl.split('/')[3] : 'Unknown',
-                                tweet: content || 'No text',
-                                quote_tweet: quoteText || null,
-                                images: images.length ? images : null,
-                                tweetUrl: tweetUrl || 'No URL',
-                                tweetId: tweetId || null
-                            };
-                        });
-                    });
+                    const tweets = await getTweetsOnPage(page);
                 
                     console.log(tweets);
                     
@@ -186,6 +151,85 @@ async function clickFirstNonPinnedTweet(page) {
     }
 }
 
+async function getTweetsOnPage(page) {
+    return await page.evaluate(() => {
+        const getText = (el) => (el ? el.innerText.trim() : null);
+        const getImages = (el) => el ? Array.from(el.querySelectorAll('img')).map(img => img.src) : [];
+
+        return Array.from(document.querySelectorAll('article')).map(tweet => {
+        // Outer text
+        const contentEl = tweet.querySelector('div[data-testid="tweetText"]');
+        const content = getText(contentEl) || 'No text';
+
+        // Gather all status anchors but exclude any /photo/
+        let anchors = Array
+            .from(tweet.querySelectorAll('a[href*="/status/"]'))
+            .filter(a => !a.href.includes('/photo/'));
+
+        // Remove duplicates by href
+        // (Converts to a Set of unique href strings, then back to DOM anchors)
+        const uniqueHrefs = [...new Set(anchors.map(a => a.href))];
+        anchors = uniqueHrefs.map(href => anchors.find(a => a.href === href));
+
+        // Decide outer vs quoted
+        let outerAnchor = null;
+        let quoteAnchor = null;
+        if (anchors.length === 1) {
+            // Only 1 anchor -> no quote tweet
+            outerAnchor = anchors[0];
+        } else if (anchors.length > 1) {
+            // Assume last anchor is the outer tweet, first anchor is quoted
+            quoteAnchor = anchors[0];
+            outerAnchor = anchors[anchors.length - 1];
+        }
+
+        // Outer tweet info
+        const tweetUrl = outerAnchor 
+            ? `https://x.com${outerAnchor.getAttribute('href').split('?')[0].split('/analytics')[0]}` 
+            : 'No URL';
+
+        const tweetIdPart = outerAnchor 
+            ? outerAnchor.href.split("/status/")[1] 
+            : null;
+        const tweetId = tweetIdPart
+            ? tweetIdPart.split("?")[0].split("/")[0]
+            : null;
+
+        const username = outerAnchor
+            ? outerAnchor.href.split('/')[3]
+            : 'Unknown';
+
+        // Quoted tweet URL
+        const possibleQuoteUrl = quoteAnchor 
+        ? `https://x.com${quoteAnchor.getAttribute('href')
+            .split('?')[0]
+            .split('/analytics')[0]}` 
+        : null;
+
+        // Compare against outer tweetUrl, then finalize
+        const quote_tweet = possibleQuoteUrl === tweetUrl 
+        ? null 
+        : possibleQuoteUrl;
+
+
+        // Images
+        const imageContainer = tweet.querySelector('div[data-testid="tweetPhoto"]');
+        const images = getImages(imageContainer);
+        const finalImages = images.length ? images : null;
+
+        return {
+            username: username,
+            tweet: content,
+            quote_tweet: quote_tweet,
+            images: finalImages,
+            tweetUrl: tweetUrl,
+            tweetId: tweetId
+        };
+        });
+    });
+}
+  
+  
 async function humanLikeScroll(page) {
     const scrollAmount = Math.floor(Math.random() * 300) + 100; // Between 100-300px
     await page.mouse.wheel({ deltaY: scrollAmount });
