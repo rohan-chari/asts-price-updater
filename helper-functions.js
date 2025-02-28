@@ -12,7 +12,7 @@ async function delay(time) {
 // Moves the mouse smoothly to a target location
 async function moveMouseSmoothly(page, x, y) {
     console.log(`🖱 Moving mouse to (${x.toFixed(2)}, ${y.toFixed(2)})`);
-    const steps = 40;
+    const steps = 70;
 
     let startX = Math.random() * 200;
     let startY = Math.random() * 200;
@@ -21,7 +21,7 @@ async function moveMouseSmoothly(page, x, y) {
         const newX = startX + ((x - startX) * i) / steps;
         const newY = startY + ((y - startY) * i) / steps;
         await page.mouse.move(newX, newY);
-        await delay(10);
+        await delay(7);
     }
     console.log('✅ Mouse movement completed.');
 }
@@ -106,9 +106,17 @@ async function clickFirstNonPinnedTweet(page) {
 
                 if (!isPinned) {
                     await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), tweet);
-                    console.log("Found non-pinned tweet and centered it.");
-                
                     const timestamp = await tweet.$('time');
+                    //CHECK IF THIS IS IN DB AND THEN SKIP ITERATION IF IT IS
+                    
+                    const tweetHref = await page.evaluate(el => {
+                        const timestamp = el.querySelector('time');
+                        if (timestamp && timestamp.parentElement) {
+                            return timestamp.parentElement.getAttribute('href');
+                        }
+                        return null;
+                    }, tweet);
+                    console.log('tweeeeeeeeeeeer',tweetHref)
                     if (timestamp) {
                         await page.evaluate(el => el.click(), timestamp);
                     } else {
@@ -121,7 +129,6 @@ async function clickFirstNonPinnedTweet(page) {
                         }
                     }
                 
-                    
                     // **Wait for thread to fully load before interacting again**
                     await page.waitForSelector('[data-testid="tweetText"]', { visible: true });
                 
@@ -150,6 +157,7 @@ async function clickFirstNonPinnedTweet(page) {
         attempts++;
     }
 }
+
 
 async function getTweetsOnPage(page) {
     page.on('console', (msg) => {
