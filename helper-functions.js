@@ -328,29 +328,51 @@ async function scrollToTop(page) {
     console.log("Scrolled to top.");
 }
 
-async function getAllTweetUrls(page){
-  console.log('entering')
+async function getMostRecentTweetFromUser(user){
+  const connection = await mysql.createConnection(DB_CONFIG);
+  const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_author = ? LIMIT 1 ORDER BY created_at DESC`, [user]);
+  await connection.end();
+  return null;
+}
+
+async function getAllTweetUrls(page, user) {
   let tweetUrls = [];
-  const tweets = await page.$$('article');
-  for(const tweet of tweets){
-    const tweetUrl = await page.evaluate(el => {
-      const timeElement = el.querySelector('time');
-      if (timeElement && timeElement.parentElement) {
-        return timeElement.parentElement.getAttribute('href');
-      }
-      return null;
-    }, tweet);
-    tweetUrls.push(`x.com${tweetUrl}`);
+  
+  const tweetId = await getMostRecentTweetFromUser(user);
+
+  const extractedTweets = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('article'))
+      .map(tweet => {
+        const timeElement = tweet.querySelector('time');
+        const href = timeElement?.parentElement?.getAttribute('href') || null;
+        
+        if (!href || !href.includes('/status/')) return null;
+        
+        return {
+          tweetUrl: `x.com${href}`,
+          tweetId: href.split('/status/')[1]
+        };
+      })
+      .filter(tweet => tweet !== null); 
+  });
+
+
+  for (const tweet of extractedTweets) {
+    if (tweet.tweetId === tweetId) break; 
+    tweetUrls.push(tweet);
+    if (tweetUrls.length >= 10) break; 
   }
+
   return tweetUrls;
 }
 
-async function scrollAndScrapeReplyUrls(page){
+
+async function scrollAndScrapeReplyUrls(page,user){
   await clickRepliesButtonWithMouse(page);
   await randomDelay();
   await humanLikeScroll(page,2);
-  const tweetUrls = await getAllTweetUrls(page);
-  tweetUrls.forEach(x => console.log(x));
+  const tweetUrls = await getAllTweetUrls(page,user);
+  return tweetUrls;
 }
 
 

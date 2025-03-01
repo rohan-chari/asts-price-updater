@@ -28,14 +28,16 @@ async function loginTwitter(page) {
     console.log('Logged into Twitter successfully.');
 }
 
-async function navigateToProfile(page) {
+async function navigateToProfiles(page) {
+    let allTweetUrls = [];
     for (const user of TARGET_USERS) {      
         await page.goto(`https://x.com/${user}`, { waitUntil: 'domcontentloaded' });
         await randomDelay();
-        await scrollAndScrapeReplyUrls(page);
-        //remove this
-        break;
+        const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
+        allTweetUrls.push(...currentUserTweetUrls);
     }
+    allTweetUrls.forEach(x => console.log(x));
+    return allTweetUrls;
 }
 
 
@@ -46,7 +48,7 @@ async function scrapeTwitterProfile() {
 
     await loginTwitter(page);
     await randomDelay();
-    await navigateToProfile(page);
+    await navigateToProfiles(page);
 }
 
 scrapeTwitterProfile();
