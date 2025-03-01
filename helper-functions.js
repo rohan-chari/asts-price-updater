@@ -99,79 +99,96 @@ async function clickRepliesButtonWithMouse(page) {
 }
 
 async function clickFirstNonPinnedTweet(page) {
-    let maxAttempts = 5 
+    const maxAttempts = 5;
     let attempts = 0;
-
     while (attempts < maxAttempts) {
-        // Get all tweets currently loaded
-        console.log('attempt #: ' + attempts)
-        const tweets = await page.$$('article');
-        
-        if (tweets.length > 0) {
-            for (const tweet of tweets) {
-                // Check if this tweet contains a div with "Pinned"
-                const isPinned = await page.evaluate(el => {
-                    return Array.from(el.querySelectorAll('div'))
-                        .some(div => div.innerText.trim() === "Pinned");
-                }, tweet);
-
-                if (!isPinned) {
-                    await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), tweet);
-                    const timestamp = await tweet.$('time');
-                    //CHECK IF THIS IS IN DB AND THEN STOP LOOP IF IT IS
-
-                    const tweetId = await page.evaluate(el => {
-                        const timestamp = el.querySelector('time');
-                        if (timestamp && timestamp.parentElement) {
-                            return timestamp.parentElement.getAttribute('href').split("/status/")[1];
-                        }
-                        return null;
-                    }, tweet);
-                    
-                    const tweetExists = await doesTweetExistInDb(tweetId);
-                    if(tweetExists){
-                        return;
-                    }else{
-                        if (timestamp) {
-                            await page.evaluate(el => el.click(), timestamp);
-                        } else {
-                            // Fallback: click the tweet body or entire tweet
-                            const tweetBody = await tweet.$('[data-testid="tweet"]');
-                            if (tweetBody) {
-                                await page.evaluate(el => el.click(), tweetBody);
-                            } else {
-                                await page.evaluate(el => el.click(), tweet);
-                            }
-                        }
-                    
-                        // **Wait for thread to fully load before interacting again**
-                        await page.waitForSelector('[data-testid="tweetText"]', { visible: true });
-                    
-                    
-                        // **Wait some time before scrolling up to avoid UI disruptions**
-                        await randomDelay();
-                    
-                        // **Now scroll to top safely**
-                        await scrollToTop(page);
-                        await randomDelay();
-                        //put this into new function - pass in page. Add delay too
-                        const tweets = await getTweetsOnPage(page);
-                        await addTweetsToDb(tweets);
-                        
-                        
-                        return; // Ensure it only processes one tweet
-                    }
-                }
-                console.log("Skipping pinned tweet...");
-            }
-        }
-
-
+      console.log(`Attempt #${attempts}`);
+  
+      // Get all loaded tweets
+      const tweets = await page.$$('article');
+      if (tweets.length === 0) {
+        // No tweets found, scroll to load more
         await humanLikeScroll(page);
-
         attempts++;
+        continue;
+      }
+  
+      for (const tweet of tweets) {
+        // Check if tweet is pinned
+        const isPinned = await page.evaluate(el => {
+          return Array.from(el.querySelectorAll('div'))
+            .some(div => div.innerText.trim() === 'Pinned');
+        }, tweet);
+        
+        if (isPinned) {
+          console.log('Skipping pinned tweet...');
+          continue;
+        }
+  
+        // Extract tweet ID
+        const tweetId = await page.evaluate(el => {
+          const timeElement = el.querySelector('time');
+          if (timeElement && timeElement.parentElement) {
+            const href = timeElement.parentElement.getAttribute('href');
+            if (href && href.includes('/status/')) {
+              return href.split('/status/')[1];
+            }
+          }
+          return null;
+        }, tweet);
+        
+        if (!tweetId) {
+          // Tweet ID could not be parsed; skip
+          continue;
+        }
+        // Check if tweet exists in DB
+        const tweetExists = await doesTweetExistInDb(tweetId);
+        if (tweetExists) {
+          // Found a tweet that exists, exit function
+          continue;
+        } else {
+          // Scroll tweet into view
+          await page.evaluate(el => {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, tweet);
+  
+          // Click to open the tweet
+          const timestampElement = await tweet.$('time');
+          if (timestampElement) {
+            await page.evaluate(el => el.click(), timestampElement);
+          } else {
+            // Fallback: click the tweet body
+            const tweetBody = await tweet.$('[data-testid="tweet"]');
+            if (tweetBody) {
+              await page.evaluate(el => el.click(), tweetBody);
+            } else {
+              await page.evaluate(el => el.click(), tweet);
+            }
+          }
+          
+          // Wait for tweet thread to load
+          await page.waitForSelector('[data-testid="tweetText"]', { visible: true });
+          await randomDelay(); // Wait a random amount of time
+  
+          // Scroll up to avoid UI disruptions
+          await scrollToTop(page);
+          await randomDelay();
+  
+          // Scrape and store thread in DB
+          const tweetsInThread = await getTweetsOnPage(page);
+          await addTweetsToDb(tweetsInThread);
+  
+          // Go back to the main tweet feed
+          await page.goBack();
+          await randomDelay();
+        }
+      }
+  
+      // Scroll to load more tweets
+      await humanLikeScroll(page);
+      attempts++;
     }
-}
+  }
 
 async function doesTweetExistInDb(tweetId) {
     try {
@@ -192,7 +209,7 @@ async function addTweetsToDb(listOfTweets){
         for (let i = 0; i < listOfTweets.length; i++) {
             const parentId = i > 0 ? listOfTweets[i - 1].tweet_id : null; 
             await connection.execute(
-                `INSERT INTO tweets (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at)
+                `INSERT IGNORE INTO tweets (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`, 
                 [
                     listOfTweets[i].tweet_id,
@@ -209,7 +226,7 @@ async function addTweetsToDb(listOfTweets){
         
     }else if(listOfTweets && listOfTweets.length ==1){
         await connection.execute(
-            `INSERT INTO tweets (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, created_at)
+            `INSERT IGNORE INTO tweets (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`, 
             [
                 listOfTweets[0].tweet_id,
