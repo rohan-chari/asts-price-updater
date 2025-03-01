@@ -11,7 +11,7 @@ const DB_CONFIG = {
 
 // Random delay function
 async function randomDelay() {
-    const delayTime = Math.floor(Math.random() * (10000 - 5000 + 1)) + 2000;
+    const delayTime = Math.floor(Math.random() * (10000 - 5000 + 1)) + 1000;
     return new Promise(resolve => setTimeout(resolve, delayTime));
 }
 
@@ -23,7 +23,7 @@ async function delay(time) {
 // Moves the mouse smoothly to a target location
 async function moveMouseSmoothly(page, x, y) {
     console.log(`🖱 Moving mouse to (${x.toFixed(2)}, ${y.toFixed(2)})`);
-    const steps = 70;
+    const steps = 8;
 
     let startX = Math.random() * 200;
     let startY = Math.random() * 200;
@@ -38,45 +38,12 @@ async function moveMouseSmoothly(page, x, y) {
 }
 
 
-// Installs a mouse tracker in the browser for debugging
-async function installMouseHelper(page) {
-    await page.evaluateOnNewDocument(() => {
-        if (window !== window.parent) return;
-        window.addEventListener('DOMContentLoaded', () => {
-            const box = document.createElement('puppeteer-mouse-pointer');
-            const styleElement = document.createElement('style');
-            styleElement.innerHTML = `
-                puppeteer-mouse-pointer {
-                    pointer-events: none;
-                    position: absolute;
-                    top: 0;
-                    z-index: 10000;
-                    left: 0;
-                    width: 20px;
-                    height: 20px;
-                    background: rgba(255, 0, 0, 0.4);
-                    border: 1px solid white;
-                    border-radius: 10px;
-                    margin: -10px 0 0 -10px;
-                    padding: 0;
-                    transition: background .2s, border-radius .2s, border-color .2s;
-                }
-            `;
-            document.head.appendChild(styleElement);
-            document.body.appendChild(box);
-            document.addEventListener('mousemove', event => {
-                box.style.left = event.pageX + 'px';
-                box.style.top = event.pageY + 'px';
-            }, true);
-        }, false);
-    });
-}
+
 
 async function clickRepliesButtonWithMouse(page) {
     console.log('🔍 Locating Replies button...');
 
     const repliesButton = await page.waitForSelector('a[href*="with_replies"]', { visible: true });
-    await installMouseHelper(page);
 
     if (repliesButton) {
         console.log('✅ Replies button found. Moving mouse...');
@@ -333,21 +300,57 @@ async function getTweetsOnPage(page) {
   
   
   
-async function humanLikeScroll(page) {
-    const scrollAmount = Math.floor(Math.random() * 300) + 100; // Between 100-300px
-    await page.mouse.wheel({ deltaY: scrollAmount });
+async function humanLikeScroll(page, amount) {
+  let scrollCounter = 0;
 
-    console.log(`Scrolled down by ${scrollAmount}px`);
+  while (scrollCounter < amount) {
+    let totalScroll = Math.floor(Math.random() * 700) + 200; 
+    let steps = Math.floor(totalScroll / 5) + 1; 
+    let stepSize = totalScroll / steps; 
 
-    // Wait a random time to mimic human behavior
-    await randomDelay(); // 300-800ms
-}
+    for (let i = 0; i < steps; i++) {
+      let xOffset = Math.random() * 5 - 2.5; 
+      let yOffset = stepSize + Math.random() * 35; 
+
+      await page.mouse.wheel({ deltaX: xOffset, deltaY: yOffset });
+      await delay(Math.random() * 50 + 30); 
+    }
+
+    await randomDelay(); 
+    scrollCounter++;
+  }
+}  
 
 async function scrollToTop(page) {
     await page.evaluate(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     console.log("Scrolled to top.");
+}
+
+async function getAllTweetUrls(page){
+  console.log('entering')
+  let tweetUrls = [];
+  const tweets = await page.$$('article');
+  for(const tweet of tweets){
+    const tweetUrl = await page.evaluate(el => {
+      const timeElement = el.querySelector('time');
+      if (timeElement && timeElement.parentElement) {
+        return timeElement.parentElement.getAttribute('href');
+      }
+      return null;
+    }, tweet);
+    tweetUrls.push(`x.com${tweetUrl}`);
+  }
+  return tweetUrls;
+}
+
+async function scrollAndScrapeReplyUrls(page){
+  await clickRepliesButtonWithMouse(page);
+  await randomDelay();
+  await humanLikeScroll(page,2);
+  const tweetUrls = await getAllTweetUrls(page);
+  tweetUrls.forEach(x => console.log(x));
 }
 
 
@@ -357,8 +360,8 @@ module.exports = {
     randomDelay,
     delay,
     moveMouseSmoothly,
-    installMouseHelper,
     clickRepliesButtonWithMouse,
     clickFirstNonPinnedTweet,
-    humanLikeScroll
+    humanLikeScroll,
+    scrollAndScrapeReplyUrls
 };
