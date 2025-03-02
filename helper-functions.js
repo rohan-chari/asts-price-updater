@@ -330,7 +330,7 @@ async function scrollToTop(page) {
 
 async function getMostRecentTweetFromUser(user){
   const connection = await mysql.createConnection(DB_CONFIG);
-  const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_author = ? LIMIT 1 ORDER BY created_at DESC`, [user]);
+  const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
   await connection.end();
   return null;
 }
