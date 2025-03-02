@@ -442,8 +442,9 @@ async function scrapeTwitterThread(page) {
   let threadAuthor = "";
 
   for (let i = 0; i < tweets.length; i++) {
-    const handle = await tweets[i].$eval('div[data-testid="User-Name"]', node => node.innerText).catch(() => "Unknown");
-    
+    const handle = await tweets[i].$$eval('div[data-testid="User-Name"]', nodes =>
+      nodes.map(node => node.innerText.split("@")[1].split("\n")[0].trim())
+    ).catch(() => ["Unknown"]);    
     
     const tweetTexts = await tweets[i].$$eval('div[data-testid="tweetText"]', nodes => 
       nodes.map(node => node.innerText.replace(/\s+/g, ' ').trim())
@@ -452,12 +453,16 @@ async function scrapeTwitterThread(page) {
     const mainTweetText = tweetTexts.length > 0 ? tweetTexts[0] : "Unknown"; 
     const quotedTweetText = tweetTexts.length > 1 ? tweetTexts.slice(1).join(" ") : null; // Everything after the first is a quoted tweet
     
+
+
     const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
-      nodes.map(a => a.getAttribute('href'))
+      nodes.map(a => {
+        const href = a.getAttribute('href');
+        const match = href.match(/^\/([^\/]+)\/status\/(\d+)\/photo\/(\d+)$/);
+        return match ? { account: match[1], url: href } : null;
+      }).filter(Boolean)
     ).catch(() => []);
   
-  
-
     const timestamp = await tweets[i].$eval('time[datetime]', node => node.getAttribute('datetime')).catch(() => "Unknown");
 
     const tweetId = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
@@ -473,8 +478,10 @@ async function scrapeTwitterThread(page) {
       threadAuthor = handle;
     }
     tweetInfo.tweetId = tweetId;
-    tweetInfo.threadAuthor = threadAuthor;
+    //tweetInfo.threadAuthor = threadAuthor;
+    tweetInfo.tweetAuthor = handle[0];
     tweetInfo.tweetText = mainTweetText;
+    tweetInfo.quoteAuthor = handle[1];
     tweetInfo.quoteTweet = quotedTweetText;
     tweetInfo.images = images;
     tweetInfo.timestamp = timestamp;
