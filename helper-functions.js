@@ -9,10 +9,41 @@ const DB_CONFIG = {
     port: process.env.DB_PORT
 };
 
+const TWITTER_USERNAME = process.env.TWITTER_USERNAME;  
+const TWITTER_PASSWORD = process.env.TWITTER_PASSWORD;
+const TARGET_USERS = process.env.TWITTER_TARGETS ? process.env.TWITTER_TARGETS.split(',') : [];
+
 // Random delay function
 async function randomDelay() {
     const delayTime = Math.floor(Math.random() * (10000 - 5000 + 1)) + 1000;
     return new Promise(resolve => setTimeout(resolve, delayTime));
+}
+
+async function loginTwitter(page) {
+    await page.goto('https://x.com/login', { waitUntil: 'networkidle2' });
+
+    await page.waitForSelector('input[name="text"]');
+    await page.type('input[name="text"]', TWITTER_USERNAME);
+    await page.keyboard.press('Enter');
+    await new Promise(resolve => setTimeout(resolve, 3000)); 
+
+    await page.waitForSelector('input[name="password"]', { visible: true });
+    await page.type('input[name="password"]', TWITTER_PASSWORD, { delay: 100 }); 
+    await page.keyboard.press('Enter');
+
+    await page.waitForNavigation();
+    console.log('Logged into Twitter successfully.');
+}
+
+async function navigateToProfiles(page) {
+    let allTweetUrls = [];
+    for (const user of TARGET_USERS) {      
+        await page.goto(`https://x.com/${user}`, { waitUntil: 'domcontentloaded' });
+        await randomDelay();
+        const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
+        allTweetUrls.push(...currentUserTweetUrls);
+    }
+    await postTwitterUrlsToDb(allTweetUrls);
 }
 
 // Delay function for replacing deprecated waitForTimeout
@@ -375,6 +406,45 @@ async function scrollAndScrapeReplyUrls(page,user){
   return tweetUrls;
 }
 
+async function postTwitterUrlsToDb(urls) {
+  const connection = await mysql.createConnection(DB_CONFIG);
+  try {
+    const query = `INSERT IGNORE INTO tweet_urls (tweetUrl, tweetId) VALUES ?`;
+
+    const values = urls.map(urlObj => [urlObj.tweetUrl, urlObj.tweetId]);
+
+    await connection.query(query, [values]);
+
+    console.log('Inserted successfully');
+  } catch (error) {
+    console.error('Error inserting data:', error);
+  } finally {
+    await connection.end();
+  }
+}
+async function fetchAllTweetUrls(){
+  const connection = await mysql.createConnection(DB_CONFIG);
+  try{
+    const query = `SELECT * FROM tweet_urls`;
+
+    const [rows] = await connection.execute(query)
+    return rows;
+
+  }catch (error) {
+    console.error('Error inserting data:', error);
+  } finally {
+    await connection.end();
+  }
+}
+async function processTweets(page){
+  const tweetUrls = await fetchAllTweetUrls();
+  for(let i = 0; i < tweetUrls.length; i++){
+    await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
+    //if tweet has $ASTS, scrape all ASTS in the thread.
+    return;
+  }
+}
+
 
 
 // Export functions for use in main script
@@ -385,5 +455,9 @@ module.exports = {
     clickRepliesButtonWithMouse,
     clickFirstNonPinnedTweet,
     humanLikeScroll,
-    scrollAndScrapeReplyUrls
+    scrollAndScrapeReplyUrls,
+    postTwitterUrlsToDb,
+    loginTwitter,
+    navigateToProfiles,
+    processTweets
 };
