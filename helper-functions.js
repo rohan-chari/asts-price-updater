@@ -36,14 +36,12 @@ async function loginTwitter(page) {
 }
 
 async function navigateToProfiles(page) {
-    let allTweetUrls = [];
     for (const user of TARGET_USERS) {      
         await page.goto(`https://x.com/${user}`, { waitUntil: 'domcontentloaded' });
         await randomDelay();
         const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
-        allTweetUrls.push(...currentUserTweetUrls);
+        await postTwitterUrlsToDb(currentUserTweetUrls);
     }
-    await postTwitterUrlsToDb(allTweetUrls);
 }
 
 // Delay function for replacing deprecated waitForTimeout
@@ -436,11 +434,65 @@ async function fetchAllTweetUrls(){
     await connection.end();
   }
 }
+
+async function scrapeTwitterThread(page) {
+  await humanLikeScroll(page, 1);
+  let tweetInfo = {};
+  const tweets = await page.$$('article');
+  let threadAuthor = "";
+
+  for (let i = 0; i < tweets.length; i++) {
+    const handle = await tweets[i].$eval('div[data-testid="User-Name"]', node => node.innerText).catch(() => "Unknown");
+    
+    
+    const tweetTexts = await tweets[i].$$eval('div[data-testid="tweetText"]', nodes => 
+      nodes.map(node => node.innerText.replace(/\s+/g, ' ').trim())
+    ).catch(() => []);
+
+    const mainTweetText = tweetTexts.length > 0 ? tweetTexts[0] : "Unknown"; 
+    const quotedTweetText = tweetTexts.length > 1 ? tweetTexts.slice(1).join(" ") : null; // Everything after the first is a quoted tweet
+    
+    const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
+      nodes.map(a => a.getAttribute('href'))
+    ).catch(() => []);
+  
+  
+
+    const timestamp = await tweets[i].$eval('time[datetime]', node => node.getAttribute('datetime')).catch(() => "Unknown");
+
+    const tweetId = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
+      return nodes
+          .map(el => el.getAttribute('href'))
+          .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
+          .map(href => href.split('/status/')[1]?.split('/')[0]) 
+          .shift() || "Unknown"; 
+    }).catch(() => "Unknown");
+  
+    
+    if (i == 0 ) {
+      threadAuthor = handle;
+    }
+    tweetInfo.tweetId = tweetId;
+    tweetInfo.threadAuthor = threadAuthor;
+    tweetInfo.tweetText = mainTweetText;
+    tweetInfo.quoteTweet = quotedTweetText;
+    tweetInfo.images = images;
+    tweetInfo.timestamp = timestamp;
+    console.log("tweet info:", tweetInfo);
+
+    return;
+  }
+
+  return tweetInfo;
+}
+
+
 async function processTweets(page){
   const tweetUrls = await fetchAllTweetUrls();
   for(let i = 0; i < tweetUrls.length; i++){
-    await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
-    //if tweet has $ASTS, scrape all ASTS in the thread.
+    await page.goto(`https://x.com/thekookreport/status/1895499707046387940`, { waitUntil: 'networkidle2' });
+    //await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
+    await scrapeTwitterThread(page);
     return;
   }
 }
