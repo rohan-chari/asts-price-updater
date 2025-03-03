@@ -1,6 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
-import moment from 'moment-timezone'; 
+const moment = require('moment-timezone');
+const { connect } = require('puppeteer');
 
 const DB_CONFIG = {
     host: process.env.DB_HOST,
@@ -461,7 +462,7 @@ async function scrapeTwitterThread(page) {
     if (i == 0 ) {
       threadAuthor = handle[0];
     }
-    if(threadAuthor == handle[0] ||  mainTweetText.includes('$ASTS')){
+    if(threadAuthor == handle[0] ||  mainTweetText.includes('$ASTS') || TARGET_USERS.includes(handle[0])){
       const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
         nodes.map(a => {
           const href = a.getAttribute('href');
@@ -529,13 +530,16 @@ async function addThreadToDb(thread) {
       tweet.parentId,
       convertToEST(tweet.timestamp)
     ]);
-    //NEED TO DELETE FROM TWEET_URLS
-
     await connection.query(query, [values]);
-    console.log('Thread inserted successfully');
+
+    const deleteValues = thread.map(tweet => tweet.tweetId);
+    for(let i = 0; i < deleteValues.length; i++){
+      await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ?`,[deleteValues[i]]);
+    }
   } catch (error) {
     console.error('Error inserting thread:', error);
   } finally {
+    console.log('CLEAN UP REST OF TWEET_URLS TABLE WHEN DONE')
     await connection.end();
   }
 }
@@ -549,11 +553,8 @@ function convertToEST(utcTimestamp) {
 async function processTweets(page){
   const tweetUrls = await fetchAllTweetUrls();
   for(let i = 0; i < tweetUrls.length; i++){
-    //NEED TO CHANGE TO NON HARDCODED
-    await page.goto(`https://x.com/thekookreport/status/1895499090521415705`, { waitUntil: 'networkidle2' });
-    //await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
+    await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
     await scrapeTwitterThread(page);
-    return;
   }
 }
 
