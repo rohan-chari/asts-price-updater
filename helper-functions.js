@@ -1,5 +1,6 @@
-const mysql = require('mysql2/promise'); // Using mysql2 for async/await support
+const mysql = require('mysql2/promise');
 require('dotenv').config();
+import moment from 'moment-timezone'; 
 
 const DB_CONFIG = {
     host: process.env.DB_HOST,
@@ -361,7 +362,7 @@ async function getMostRecentTweetFromUser(user){
   const connection = await mysql.createConnection(DB_CONFIG);
   const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
   await connection.end();
-  return null;
+  return rows;
 }
 
 async function getAllTweetUrls(page, user) {
@@ -437,15 +438,16 @@ async function fetchAllTweetUrls(){
 
 async function scrapeTwitterThread(page) {
   await humanLikeScroll(page, 1);
-  let tweetInfo = {};
+  let tweetInfo = [];
   const tweets = await page.$$('article');
   let threadAuthor = "";
+  let lastTweetId = null;
 
   for (let i = 0; i < tweets.length; i++) {
     const handle = await tweets[i].$$eval('div[data-testid="User-Name"]', nodes =>
       nodes.map(node => node.innerText.split("@")[1].split("\n")[0].trim())
     ).catch(() => ["Unknown"]);    
-    
+
     const tweetTexts = await tweets[i].$$eval('div[data-testid="tweetText"]', nodes => 
       nodes.map(node => node.innerText.replace(/\s+/g, ' ').trim())
     ).catch(() => []);
@@ -453,51 +455,99 @@ async function scrapeTwitterThread(page) {
     const mainTweetText = tweetTexts.length > 0 ? tweetTexts[0] : "Unknown"; 
     const quotedTweetText = tweetTexts.length > 1 ? tweetTexts.slice(1).join(" ") : null; // Everything after the first is a quoted tweet
     
-
-
-    const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
-      nodes.map(a => {
-        const href = a.getAttribute('href');
-        const match = href.match(/^\/([^\/]+)\/status\/(\d+)\/photo\/(\d+)$/);
-        return match ? { account: match[1], url: href } : null;
-      }).filter(Boolean)
-    ).catch(() => []);
-  
-    const timestamp = await tweets[i].$eval('time[datetime]', node => node.getAttribute('datetime')).catch(() => "Unknown");
-
-    const tweetId = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
-      return nodes
-          .map(el => el.getAttribute('href'))
-          .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
-          .map(href => href.split('/status/')[1]?.split('/')[0]) 
-          .shift() || "Unknown"; 
-    }).catch(() => "Unknown");
-  
-    
     if (i == 0 ) {
-      threadAuthor = handle;
+      threadAuthor = handle[0];
     }
-    tweetInfo.tweetId = tweetId;
-    //tweetInfo.threadAuthor = threadAuthor;
-    tweetInfo.tweetAuthor = handle[0];
-    tweetInfo.tweetText = mainTweetText;
-    tweetInfo.quoteAuthor = handle[1];
-    tweetInfo.quoteTweet = quotedTweetText;
-    tweetInfo.images = images;
-    tweetInfo.timestamp = timestamp;
-    console.log("tweet info:", tweetInfo);
-
-    return;
+    if(threadAuthor == handle[0] ||  mainTweetText.includes('$ASTS')){
+      const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
+        nodes.map(a => {
+          const href = a.getAttribute('href');
+          const imgTag = a.querySelector('img'); // Get the actual image
+          const src = imgTag ? imgTag.src : null;
+      
+          const match = href.match(/^\/([^\/]+)\/status\/(\d+)\/photo\/(\d+)$/);
+          return match && src ? { account: match[1], url: href, imageUrl: src } : null;
+        }).filter(Boolean) // Remove any null values
+      ).catch(() => []);
+      
+      // Separate images by account
+      const tweetImages = images.filter(x => x.account === handle[0]).map(x => ({ imageUrl: x.imageUrl }));
+      const quoteImages = images.filter(x => x.account === handle[1]).map(x => ({ imageUrl: x.imageUrl }));
+  
+      const timestamp = await tweets[i].$eval('time[datetime]', node => node.getAttribute('datetime')).catch(() => "Unknown");
+  
+      const tweetId = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
+        return nodes
+            .map(el => el.getAttribute('href'))
+            .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
+            .map(href => href.split('/status/')[1]?.split('/')[0]) 
+            .shift() || "Unknown"; 
+      }).catch(() => "Unknown");
+    
+      //tweetInfo.threadAuthor = threadAuthor;
+  
+  
+      tweetInfo.push({    
+        tweetId: tweetId,
+        tweetAuthor: handle[0],
+        tweetText: mainTweetText,
+        quoteAuthor: handle[1] || null,
+        quoteTweet: quotedTweetText,
+        tweetImages: tweetImages,
+        quoteImages: quoteImages,
+        timestamp: timestamp,
+        parentId: lastTweetId
+      })
+      lastTweetId = tweetId;  
+    }else{
+      continue;
+    }
   }
+  await addThreadToDb(tweetInfo);
+}
 
-  return tweetInfo;
+async function addThreadToDb(thread) {
+  const connection = await mysql.createConnection(DB_CONFIG);
+  try {
+    const query = `
+      INSERT IGNORE INTO tweets 
+      (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at) 
+      VALUES ?
+    `;
+
+    const values = thread.map(tweet => [
+      tweet.tweetId,
+      tweet.tweetText,
+      tweet.tweetAuthor,
+      JSON.stringify(tweet.tweetImages), 
+      tweet.quoteTweet,
+      tweet.quoteAuthor,
+      JSON.stringify(tweet.quoteImages), 
+      tweet.parentId,
+      convertToEST(tweet.timestamp)
+    ]);
+    //NEED TO DELETE FROM TWEET_URLS
+
+    await connection.query(query, [values]);
+    console.log('Thread inserted successfully');
+  } catch (error) {
+    console.error('Error inserting thread:', error);
+  } finally {
+    await connection.end();
+  }
+}
+
+function convertToEST(utcTimestamp) {
+  if (!utcTimestamp || utcTimestamp === "Unknown") return null; // Handle missing timestamps
+  return moment.utc(utcTimestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm:ss");
 }
 
 
 async function processTweets(page){
   const tweetUrls = await fetchAllTweetUrls();
   for(let i = 0; i < tweetUrls.length; i++){
-    await page.goto(`https://x.com/thekookreport/status/1895499707046387940`, { waitUntil: 'networkidle2' });
+    //NEED TO CHANGE TO NON HARDCODED
+    await page.goto(`https://x.com/thekookreport/status/1895499090521415705`, { waitUntil: 'networkidle2' });
     //await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
     await scrapeTwitterThread(page);
     return;
