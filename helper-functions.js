@@ -446,7 +446,6 @@ async function scrapeTwitterThread(page) {
   const tweets = await page.$$('article');
   let threadAuthor = "";
   let lastTweetId = null;
-
   for (let i = 0; i < tweets.length; i++) {
     const handle = await tweets[i].$$eval('div[data-testid="User-Name"]', nodes =>
       nodes.map(node => node.innerText.split("@")[1].split("\n")[0].trim())
@@ -462,6 +461,7 @@ async function scrapeTwitterThread(page) {
     if (i == 0 ) {
       threadAuthor = handle[0];
     }
+
     if(threadAuthor == handle[0] ||  mainTweetText.includes('$ASTS') || TARGET_USERS.includes(handle[0])){
       const images = await tweets[i].$$eval('a[href*="/photo/"]', nodes =>
         nodes.map(a => {
@@ -480,16 +480,16 @@ async function scrapeTwitterThread(page) {
   
       const timestamp = await tweets[i].$eval('time[datetime]', node => node.getAttribute('datetime')).catch(() => "Unknown");
   
-      const tweetId = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
+      const tweetIds = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
         return nodes
-            .map(el => el.getAttribute('href'))
-            .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
-            .map(href => href.split('/status/')[1]?.split('/')[0]) 
-            .shift() || "Unknown"; 
-      }).catch(() => "Unknown");
-    
-      //tweetInfo.threadAuthor = threadAuthor;
-  
+          .map(el => el.getAttribute('href'))
+          .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
+          .map(href => href)
+          .filter(Boolean);
+      }).catch(() => []);
+
+      
+      const tweetId = tweetIds.find(href => href.startsWith(`/${handle[0]}`)).split("/status/")[1].split("/")[0];
   
       tweetInfo.push({    
         tweetId: tweetId,
@@ -504,6 +504,22 @@ async function scrapeTwitterThread(page) {
       })
       lastTweetId = tweetId;  
     }else{
+      const tweetIds = await tweets[i].$$eval('a[href*="/status/"]', nodes => {
+        return nodes
+          .map(el => el.getAttribute('href'))
+          .filter(href => href && !href.includes('/photo/') && !href.includes('/analytics'))
+          .map(href => href)
+          .filter(Boolean);
+      }).catch(() => []);
+      const foundHref = tweetIds.find(href => href.startsWith(`/${handle[0]}`));
+      const tweetId = foundHref
+        ? foundHref.split('/status/')[1].split('/')[0]
+        : null;
+      if(tweetId){
+        const connection = await mysql.createConnection(DB_CONFIG);
+        await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ?`,[tweetId]);
+        await connection.end();
+      }
       continue;
     }
   }
@@ -518,7 +534,6 @@ async function addThreadToDb(thread) {
       (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at) 
       VALUES ?
     `;
-
     const values = thread.map(tweet => [
       tweet.tweetId,
       tweet.tweetText,
@@ -539,7 +554,6 @@ async function addThreadToDb(thread) {
   } catch (error) {
     console.error('Error inserting thread:', error);
   } finally {
-    console.log('CLEAN UP REST OF TWEET_URLS TABLE WHEN DONE')
     await connection.end();
   }
 }
@@ -553,6 +567,7 @@ function convertToEST(utcTimestamp) {
 async function processTweets(page){
   const tweetUrls = await fetchAllTweetUrls();
   for(let i = 0; i < tweetUrls.length; i++){
+    //await page.goto(`https://x.com/agritechjoer/status/1895780865424441575`, { waitUntil: 'networkidle2' });
     await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
     await scrapeTwitterThread(page);
   }
