@@ -369,6 +369,7 @@ async function getAllTweetUrls(page, user) {
   let tweetUrls = [];
   
   const tweetId = await getMostRecentTweetFromUser(user);
+  console.log('what does this look like',tweetId);
 
   const extractedTweets = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('article'))
