@@ -393,6 +393,8 @@ async function getAllTweetUrls(page, user) {
     if (tweetUrls.length >= 10) break; 
   }
 
+  console.log("NEED TO TEST HERE IN THE FUTURE WHEN RESCRAPING SOMEONES PAGE TO MAKE SURE DUPES ARENT ADDED")
+
   return tweetUrls;
 }
 
