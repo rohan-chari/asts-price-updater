@@ -39,8 +39,6 @@ async function loginTwitter(page) {
 
 async function navigateToProfiles(page) {
     for (const user of TARGET_USERS) {      
-        await page.goto(`https://x.com/${user}`, { waitUntil: 'domcontentloaded' });
-        await randomDelay();
         const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
         await postTwitterUrlsToDb(currentUserTweetUrls);
     }
@@ -68,33 +66,6 @@ async function moveMouseSmoothly(page, x, y) {
     console.log('✅ Mouse movement completed.');
 }
 
-
-
-
-async function clickRepliesButtonWithMouse(page) {
-    console.log('🔍 Locating Replies button...');
-
-    const repliesButton = await page.waitForSelector('a[href*="with_replies"]', { visible: true });
-
-    if (repliesButton) {
-        console.log('✅ Replies button found. Moving mouse...');
-        
-        const box = await repliesButton.boundingBox();
-        
-        if (box) {
-            console.log(`🎯 Moving mouse to Replies button at (${box.x}, ${box.y})`);
-            
-            await moveMouseSmoothly(page, box.x + box.width / 2, box.y + box.height / 2);
-
-            console.log('🖱 Mouse reached Replies button. Clicking...');
-            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        } else {
-            console.log('❌ Could not retrieve button position.');
-        }
-    } else {
-        console.log('❌ Replies button not found.');
-    }
-}
 
 async function clickFirstNonPinnedTweet(page) {
     const maxAttempts = 5;
@@ -360,18 +331,21 @@ async function scrollToTop(page) {
 }
 
 async function getMostRecentTweetFromUser(user){
-  const connection = await mysql.createConnection(DB_CONFIG);
-  const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
+  const connection = await mysql.createConnection({
+    ...DB_CONFIG,
+    supportBigNumbers: true,
+    bigNumberStrings: true
+  });  const [rows] = await connection.execute(`SELECT * FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
   await connection.end();
-  return rows;
+  return rows.length > 0 ? rows[0].tweet_id : null; 
 }
 
 async function getAllTweetUrls(page, user) {
   let tweetUrls = [];
   
-  const tweetId = await getMostRecentTweetFromUser(user);
-  console.log('what does this look like',tweetId);
-
+  const recentTweetId = await getMostRecentTweetFromUser(user);
+  const tweetId = recentTweetId ? BigInt(recentTweetId) : BigInt(-1);
+  
   const extractedTweets = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('article'))
       .map(tweet => {
@@ -390,19 +364,17 @@ async function getAllTweetUrls(page, user) {
 
 
   for (const tweet of extractedTweets) {
-    if (tweet.tweetId === tweetId) break; 
+    if (BigInt(tweet.tweetId) === tweetId) break; 
     tweetUrls.push(tweet);
     if (tweetUrls.length >= 10) break; 
   }
-
-  console.log("NEED TO TEST HERE IN THE FUTURE WHEN RESCRAPING SOMEONES PAGE TO MAKE SURE DUPES ARENT ADDED")
 
   return tweetUrls;
 }
 
 
 async function scrollAndScrapeReplyUrls(page,user){
-  await clickRepliesButtonWithMouse(page);
+  await page.goto(`https://x.com/${user}/with_replies`, { waitUntil: 'domcontentloaded' });
   await randomDelay();
   await humanLikeScroll(page,2);
   const tweetUrls = await getAllTweetUrls(page,user);
@@ -580,7 +552,6 @@ module.exports = {
     randomDelay,
     delay,
     moveMouseSmoothly,
-    clickRepliesButtonWithMouse,
     clickFirstNonPinnedTweet,
     humanLikeScroll,
     scrollAndScrapeReplyUrls,
