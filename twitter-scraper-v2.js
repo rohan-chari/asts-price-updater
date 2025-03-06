@@ -60,7 +60,7 @@ async function scrapeTwitterProfile() {
     isProcessing = true;
 
     try {
-        const page = await openBrowserIfNeeded();
+        page = await openBrowserIfNeeded();
 
         if (PROXY_USER && PROXY_PASS) {
             await page.authenticate({ username: PROXY_USER, password: PROXY_PASS });

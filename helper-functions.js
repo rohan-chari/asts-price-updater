@@ -43,7 +43,6 @@ async function navigateToProfiles(page) {
       console.log(`Scraping ${user}'s page.`)
         const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
         await postTwitterUrlsToDb(currentUserTweetUrls);
-        return;
     }
 }
 
@@ -378,16 +377,17 @@ async function getAllTweetUrls(page, user) {
   let tweetIdList = extractedTweets.map(t => t.tweetId.toString()); // Convert BigInts to strings
 
   const placeholders = tweetIdList.map(() => '?').join(',');
-  
-  const [rows] = await connection.execute(
-    `SELECT tweet_id FROM tweets WHERE tweet_id IN (${placeholders})`,
-    tweetIdList
-  );
-  rowsMapped = rows.map(t => t.tweet_id);
-  for (const tweet of extractedTweets) {
-    if (rowsMapped.includes(tweet.tweetId)) continue; 
-    tweetUrls.push(tweet);
-    if (tweetUrls.length >= 10) break; 
+  if(placeholders){
+    const [rows] = await connection.execute(
+      `SELECT tweet_id FROM tweets WHERE tweet_id IN (${placeholders})`,
+      tweetIdList
+    );
+    rowsMapped = rows.map(t => t.tweet_id);
+    for (const tweet of extractedTweets) {
+      if (rowsMapped.includes(tweet.tweetId)) continue; 
+      tweetUrls.push(tweet);
+      if (tweetUrls.length >= 10) break; 
+    }
   }
   await connection.end();
   return tweetUrls;

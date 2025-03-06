@@ -23,7 +23,7 @@ async function openBrowserIfNeeded() {
         if (!browser) {
             console.log("🚀 Launching new Puppeteer browser...");
             browser = await puppeteer.launch({
-                headless: false,
+                headless: true,
                 slowMo: 0,
                 args: [
                     `--proxy-server=${PROXY_HOST}`,
@@ -64,7 +64,7 @@ async function processAndScrapeTwitterUrls() {
         if (!(await areThereAnyTweets())) {
             console.log("ℹ️ No tweets to scrape.");
         } else {
-            const page = await openBrowserIfNeeded();
+            page = await openBrowserIfNeeded();
 
             if (PROXY_USER && PROXY_PASS) {
                 await page.authenticate({ username: PROXY_USER, password: PROXY_PASS });
