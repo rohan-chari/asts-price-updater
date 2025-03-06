@@ -384,13 +384,13 @@ async function scrollAndScrapeReplyUrls(page,user){
 async function postTwitterUrlsToDb(urls) {
   const connection = await mysql.createConnection(DB_CONFIG);
   try {
-    const query = `INSERT IGNORE INTO tweet_urls (tweetUrl, tweetId) VALUES ?`;
-
-    const values = urls.map(urlObj => [urlObj.tweetUrl, urlObj.tweetId]);
-
-    await connection.query(query, [values]);
-
-    console.log('Inserted successfully');
+    if(urls.length > 0){
+      const query = `INSERT IGNORE INTO tweet_urls (tweetUrl, tweetId) VALUES ?`;
+      const values = urls.map(urlObj => [urlObj.tweetUrl, urlObj.tweetId]);
+      await connection.query(query, [values]);
+  
+      console.log(`Inserted ${urls.length} rows successfully`);
+    }
   } catch (error) {
     console.error('Error inserting data:', error);
   } finally {
@@ -412,7 +412,22 @@ async function fetchAllTweetUrls(){
   }
 }
 
-async function scrapeTwitterThread(page) {
+async function areThereAnyTweets(){
+  const connection = await mysql.createConnection(DB_CONFIG);
+  try{
+    const query = `SELECT * FROM tweet_urls`;
+
+    const [rows] = await connection.execute(query)
+    return rows.length > 0;
+
+  }catch (error) {
+    console.error('Error inserting data:', error);
+  } finally {
+    await connection.end();
+  }
+}
+
+async function scrapeTwitterThread(page,pageUrl) {
   await humanLikeScroll(page, 1);
   let tweetInfo = [];
   const tweets = await page.$$('article');
@@ -495,10 +510,10 @@ async function scrapeTwitterThread(page) {
       continue;
     }
   }
-  await addThreadToDb(tweetInfo);
+  await addThreadToDb(tweetInfo,pageUrl);
 }
 
-async function addThreadToDb(thread) {
+async function addThreadToDb(thread,pageUrl) {
   const connection = await mysql.createConnection(DB_CONFIG);
   try {
     const query = `
@@ -521,7 +536,7 @@ async function addThreadToDb(thread) {
 
     const deleteValues = thread.map(tweet => tweet.tweetId);
     for(let i = 0; i < deleteValues.length; i++){
-      await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ?`,[deleteValues[i]]);
+      await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ? OR tweetUrl = ?`, [deleteValues[i], pageUrl]);
     }
   } catch (error) {
     console.error('Error inserting thread:', error);
@@ -530,19 +545,33 @@ async function addThreadToDb(thread) {
   }
 }
 
-function convertToEST(utcTimestamp) {
-  if (!utcTimestamp || utcTimestamp === "Unknown") return null; // Handle missing timestamps
-  return moment.utc(utcTimestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm:ss");
+function convertToEST(durationString) {
+  if (durationString.startsWith('P')) {
+      const duration = moment.duration(durationString);
+      console.log(`✅ Converted Duration: ${duration.humanize()}`);
+      return duration;
+  }
+  return moment.utc(durationString).tz("America/New_York").format("YYYY-MM-DD HH:mm:ss");
 }
 
 
 async function processTweets(page){
   const tweetUrls = await fetchAllTweetUrls();
-  for(let i = 0; i < tweetUrls.length; i++){
-    //await page.goto(`https://x.com/agritechjoer/status/1895780865424441575`, { waitUntil: 'networkidle2' });
-    await page.goto(`https://${tweetUrls[i].tweetUrl}`, { waitUntil: 'networkidle2' });
-    await scrapeTwitterThread(page);
+  if(tweetUrls.length == 0){
+    console.log("No tweets to scrape.")
+    return;
   }
+  for(let i = 0; i < tweetUrls.length; i++){
+    let pageUrl = tweetUrls[i].tweetUrl
+    try{
+      await page.goto(`https://${pageUrl}`, { timeout: 60000, waitUntil: 'domcontentloaded' });
+    }catch(error){
+      console.error(`Failed to navigate to ${pageUrl}:`, error);
+      return;
+    }
+    await scrapeTwitterThread(page,pageUrl);
+  }
+  return;
 }
 
 
@@ -558,5 +587,6 @@ module.exports = {
     postTwitterUrlsToDb,
     loginTwitter,
     navigateToProfiles,
-    processTweets
+    processTweets,
+    areThereAnyTweets
 };
