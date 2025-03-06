@@ -1,2 +1,4 @@
 node_modules
 .env
+scraper_cookies.json
+processor_cookies.json

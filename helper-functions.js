@@ -2,6 +2,7 @@ const mysql = require('mysql2/promise');
 require('dotenv').config();
 const moment = require('moment-timezone');
 const { connect } = require('puppeteer');
+const { timeout } = require('puppeteer');
 
 const DB_CONFIG = {
     host: process.env.DB_HOST,
@@ -39,8 +40,10 @@ async function loginTwitter(page) {
 
 async function navigateToProfiles(page) {
     for (const user of TARGET_USERS) {      
+      console.log(`Scraping ${user}'s page.`)
         const currentUserTweetUrls = await scrollAndScrapeReplyUrls(page,user);
         await postTwitterUrlsToDb(currentUserTweetUrls);
+        return;
     }
 }
 
@@ -164,7 +167,6 @@ async function doesTweetExistInDb(tweetId) {
         const connection = await mysql.createConnection(DB_CONFIG);
         const [rows] = await connection.execute(`SELECT 1 FROM tweets WHERE tweet_id = ? LIMIT 1`, [tweetId]);
         await connection.end();
-        console.log("DB CHECK", rows.length > 0)
         return rows.length > 0; 
     } catch (error) {
         console.error(`❌ Database error (doesTweetExistInDb):`, error);
@@ -306,22 +308,31 @@ async function humanLikeScroll(page, amount) {
   let scrollCounter = 0;
 
   while (scrollCounter < amount) {
-    let totalScroll = Math.floor(Math.random() * 700) + 200; 
-    let steps = Math.floor(totalScroll / 5) + 1; 
-    let stepSize = totalScroll / steps; 
+      let totalScroll = Math.floor(Math.random() * 1000) + 600; // Scroll more distance per cycle
+      let steps = Math.floor(totalScroll / (Math.random() * 50 + 40)); // Fewer, longer steps
+      let stepSize = totalScroll / steps;
 
-    for (let i = 0; i < steps; i++) {
-      let xOffset = Math.random() * 5 - 2.5; 
-      let yOffset = stepSize + Math.random() * 35; 
+      let accelerationFactor = Math.random() * 1.1 + 0.5; // Some randomness in speed
 
-      await page.mouse.wheel({ deltaX: xOffset, deltaY: yOffset });
-      await delay(Math.random() * 50 + 30); 
-    }
+      for (let i = 0; i < steps; i++) {
+          let xOffset = Math.random() * 4 - 2; // Small natural hand movement
+          let yOffset = stepSize * (1 + Math.random() * 0.05) * accelerationFactor; // Variable step size
 
-    await randomDelay(); 
-    scrollCounter++;
+          await page.mouse.wheel({ deltaX: xOffset, deltaY: yOffset });
+
+          let delayTime = Math.random() * 30 + 20; // Reduce delays for a smoother experience
+          if (Math.random() > 0.9) delayTime += 100; // Occasionally pause longer
+          await delay(delayTime);
+      }
+
+      if (Math.random() > 0.85) {
+          await delay(300 + Math.random() * 200);
+      }
+
+      scrollCounter++;
   }
-}  
+}
+
 
 async function scrollToTop(page) {
     await page.evaluate(() => {
@@ -335,17 +346,19 @@ async function getMostRecentTweetFromUser(user){
     ...DB_CONFIG,
     supportBigNumbers: true,
     bigNumberStrings: true
-  });  const [rows] = await connection.execute(`SELECT * FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
+  }); 
+  const [rows] = await connection.execute(`SELECT * FROM tweets WHERE tweet_author = ? ORDER BY created_at DESC LIMIT 1`, [user]);
   await connection.end();
   return rows.length > 0 ? rows[0].tweet_id : null; 
 }
 
 async function getAllTweetUrls(page, user) {
   let tweetUrls = [];
-  
-  const recentTweetId = await getMostRecentTweetFromUser(user);
-  const tweetId = recentTweetId ? BigInt(recentTweetId) : BigInt(-1);
-  
+  const connection = await mysql.createConnection({
+    ...DB_CONFIG,
+    supportBigNumbers: true,
+    bigNumberStrings: true
+  }); 
   const extractedTweets = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('article'))
       .map(tweet => {
@@ -362,19 +375,28 @@ async function getAllTweetUrls(page, user) {
       .filter(tweet => tweet !== null); 
   });
 
+  let tweetIdList = extractedTweets.map(t => t.tweetId.toString()); // Convert BigInts to strings
 
+  const placeholders = tweetIdList.map(() => '?').join(',');
+  
+  const [rows] = await connection.execute(
+    `SELECT tweet_id FROM tweets WHERE tweet_id IN (${placeholders})`,
+    tweetIdList
+  );
+  rowsMapped = rows.map(t => t.tweet_id);
   for (const tweet of extractedTweets) {
-    if (BigInt(tweet.tweetId) === tweetId) break; 
+    if (rowsMapped.includes(tweet.tweetId)) continue; 
     tweetUrls.push(tweet);
     if (tweetUrls.length >= 10) break; 
   }
-
+  await connection.end();
   return tweetUrls;
 }
 
 
 async function scrollAndScrapeReplyUrls(page,user){
-  await page.goto(`https://x.com/${user}/with_replies`, { waitUntil: 'domcontentloaded' });
+  console.log(`Scraping ${user}'s replies.`)
+  await page.goto(`https://x.com/${user}/with_replies`, { waitUntil: 'networkidle2',timeout:60000 });
   await randomDelay();
   await humanLikeScroll(page,2);
   const tweetUrls = await getAllTweetUrls(page,user);
@@ -428,7 +450,8 @@ async function areThereAnyTweets(){
 }
 
 async function scrapeTwitterThread(page,pageUrl) {
-  await humanLikeScroll(page, 1);
+  console.log(`Scraping Twitter Thread at: ${pageUrl}` )
+  await humanLikeScroll(page, 2);
   let tweetInfo = [];
   const tweets = await page.$$('article');
   let threadAuthor = "";
@@ -476,8 +499,18 @@ async function scrapeTwitterThread(page,pageUrl) {
       }).catch(() => []);
 
       
-      const tweetId = tweetIds.find(href => href.startsWith(`/${handle[0]}`)).split("/status/")[1].split("/")[0];
-  
+      const tweetUrl = tweetIds.find(href => href.startsWith(`/${handle[0]}`));
+
+      if (!tweetUrl) {
+          throw new Error(`No matching tweet URL found for handle: ${handle[0]}`);
+      }
+      
+      const tweetId = tweetUrl.split("/status/")[1]?.split("/")[0];
+      
+      if (!tweetId) {
+          throw new Error(`Tweet ID extraction failed from URL: ${tweetUrl}`);
+      }
+
       tweetInfo.push({    
         tweetId: tweetId,
         tweetAuthor: handle[0],
@@ -513,35 +546,55 @@ async function scrapeTwitterThread(page,pageUrl) {
   await addThreadToDb(tweetInfo,pageUrl);
 }
 
-async function addThreadToDb(thread,pageUrl) {
-  const connection = await mysql.createConnection(DB_CONFIG);
-  try {
-    const query = `
-      INSERT IGNORE INTO tweets 
-      (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at) 
-      VALUES ?
-    `;
-    const values = thread.map(tweet => [
-      tweet.tweetId,
-      tweet.tweetText,
-      tweet.tweetAuthor,
-      JSON.stringify(tweet.tweetImages), 
-      tweet.quoteTweet,
-      tweet.quoteAuthor,
-      JSON.stringify(tweet.quoteImages), 
-      tweet.parentId,
-      convertToEST(tweet.timestamp)
-    ]);
-    await connection.query(query, [values]);
+async function addThreadToDb(thread, pageUrl) {
+  console.log("Adding Thread To Db.");
 
-    const deleteValues = thread.map(tweet => tweet.tweetId);
-    for(let i = 0; i < deleteValues.length; i++){
-      await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ? OR tweetUrl = ?`, [deleteValues[i], pageUrl]);
-    }
+  let connection;
+  try {
+      connection = await mysql.createConnection(DB_CONFIG);
+
+      try {
+          const query = `
+              INSERT IGNORE INTO tweets 
+              (tweet_id, tweet_text, tweet_author, tweet_images, quote_text, quote_author, quote_images, parent_id, created_at) 
+              VALUES ?
+          `;
+          const values = thread.map(tweet => [
+              tweet.tweetId,
+              tweet.tweetText,
+              tweet.tweetAuthor,
+              JSON.stringify(tweet.tweetImages),
+              tweet.quoteTweet,
+              tweet.quoteAuthor,
+              JSON.stringify(tweet.quoteImages),
+              tweet.parentId,
+              convertToEST(tweet.timestamp)
+          ]);
+
+          await connection.query(query, [values]);
+      } catch (error) {
+          console.error("❌ Error inserting tweets into DB:", error);
+      }
+
+      try {
+          const deleteValues = thread.map(tweet => tweet.tweetId);
+          for (let i = 0; i < deleteValues.length; i++) {
+              await connection.execute(`DELETE FROM tweet_urls WHERE tweetId = ? OR tweetUrl = ?`, [deleteValues[i], pageUrl]);
+          }
+      } catch (error) {
+          console.error("❌ Error deleting processed tweets:", error);
+      }
+
   } catch (error) {
-    console.error('Error inserting thread:', error);
+      console.error("❌ Database connection error:", error);
   } finally {
-    await connection.end();
+      if (connection) {
+          try {
+              await connection.end();
+          } catch (error) {
+              console.error("❌ Error closing DB connection:", error);
+          }
+      }
   }
 }
 
@@ -555,23 +608,36 @@ function convertToEST(durationString) {
 }
 
 
-async function processTweets(page){
-  const tweetUrls = await fetchAllTweetUrls();
-  if(tweetUrls.length == 0){
-    console.log("No tweets to scrape.")
-    return;
+async function processTweets(page) {
+  console.log("Entering Process Tweets function.");
+
+  try {
+      const tweetUrls = await fetchAllTweetUrls();
+      if (tweetUrls.length === 0) {
+          console.log("No tweets to scrape.");
+          return;
+      }
+
+      for (let i = 0; i < tweetUrls.length; i++) {
+          let pageUrl = tweetUrls[i].tweetUrl;
+          try {
+              await page.goto(`https://${pageUrl}`, { timeout: 60000, waitUntil: 'networkidle2' });
+              await randomDelay();
+          } catch (error) {
+              console.error(`❌ Failed to navigate to ${pageUrl}:`, error);
+              continue; // Skip to the next tweet instead of stopping execution
+          }
+
+          try {
+              await scrapeTwitterThread(page, pageUrl);
+          } catch (error) {
+              console.error(`❌ Error scraping tweet at ${pageUrl}:`, error);
+              continue; // Skip to the next tweet
+          }
+      }
+  } catch (error) {
+      console.error("❌ Error in processTweets function:", error);
   }
-  for(let i = 0; i < tweetUrls.length; i++){
-    let pageUrl = tweetUrls[i].tweetUrl
-    try{
-      await page.goto(`https://${pageUrl}`, { timeout: 60000, waitUntil: 'domcontentloaded' });
-    }catch(error){
-      console.error(`Failed to navigate to ${pageUrl}:`, error);
-      return;
-    }
-    await scrapeTwitterThread(page,pageUrl);
-  }
-  return;
 }
 
 
