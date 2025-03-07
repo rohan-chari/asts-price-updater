@@ -92,11 +92,16 @@ async function scrapeTwitterProfile() {
         }
     } catch (error) {
         console.error("❌ Error in scraping process:", error);
+        if (browser) { // ✅ Ensure browser is closed on error
+            await browser.close();
+            browser = null;
+            page = null;
+        }
     } finally {
         isProcessing = false;
+        setTimeout(scrapeTwitterProfile, 180000);
     }
 
-    setTimeout(scrapeTwitterProfile, 180000);
 }
 
 scrapeTwitterProfile();
