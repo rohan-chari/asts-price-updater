@@ -70,7 +70,7 @@ async function processAndScrapeTwitterUrls() {
                 await page.authenticate({ username: PROXY_USER, password: PROXY_PASS });
             }
     
-            await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.goto('https://x.com/home', { waitUntil: 'networkidle2', timeout: 90000 });
     
             const isLoggedIn = await page.evaluate(() => {
                 return document.querySelector('input[name=\"session[username_or_email]\"]') === null;

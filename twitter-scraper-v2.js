@@ -66,7 +66,7 @@ async function scrapeTwitterProfile() {
             await page.authenticate({ username: PROXY_USER, password: PROXY_PASS });
         }
 
-        await page.goto('https://twitter.com/home', { timeout: 60000, waitUntil: 'domcontentloaded' });
+        await page.goto('https://twitter.com/home', { timeout: 90000, waitUntil: 'networkidle2' });
 
         const isLoggedIn = await page.evaluate(() => {
             return document.querySelector('input[name="session[username_or_email]"]') === null;
