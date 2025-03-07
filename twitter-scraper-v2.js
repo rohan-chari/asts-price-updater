@@ -25,7 +25,7 @@ async function openBrowserIfNeeded() {
             browser = await puppeteer.launch({
                 headless: true,
                 slowMo: 0,
-                protocolTimeout: 60000,
+                protocolTimeout: 90000,
                 args: [
                     `--proxy-server=${PROXY_HOST}`,
                     '--no-sandbox',
@@ -96,7 +96,7 @@ async function scrapeTwitterProfile() {
         isProcessing = false;
     }
 
-    setTimeout(scrapeTwitterProfile, 5000);
+    setTimeout(scrapeTwitterProfile, 180000);
 }
 
 scrapeTwitterProfile();

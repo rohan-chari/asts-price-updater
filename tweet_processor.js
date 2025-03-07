@@ -30,7 +30,7 @@ async function openBrowserIfNeeded() {
                     '--no-sandbox',
                     '--disable-setuid-sandbox'
                 ],
-                protocolTimeout: 60000
+                protocolTimeout: 90000
             });
         }
 
